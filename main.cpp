@@ -1,7 +1,6 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include <sstream>
 #include <clickhouse/client.h>
 
 using namespace clickhouse;
@@ -35,15 +34,14 @@ std::vector<Row> fetchRows(Client &client, const std::string &table_name) {
     std::string query = "SELECT * FROM " + table_name;
 
     client.Select(query, [&](const Block &block) {
-        if (block.GetColumnCount() < 9) {
-            std::cerr << "Ошибка: недостаточно столбцов в блоке для таблицы " << table_name << std::endl;
-            return;
-        }
+        std::cout << "Processing block with " << block.GetRowCount() << " rows and " << block.GetColumnCount() << " columns." << std::endl;
+
+
 
         for (size_t i = 0; i < block.GetRowCount(); ++i) {
             Row row;
             try {
-                auto col0 = block[0]->As<ColumnString>();
+                auto col0 = block[0]->As<ColumnDateTime64>();
                 auto col1 = block[1]->As<ColumnUInt32>();
                 auto col2 = block[2]->As<ColumnNullable>();
                 auto col3 = block[3]->As<ColumnNullable>();
@@ -54,19 +52,17 @@ std::vector<Row> fetchRows(Client &client, const std::string &table_name) {
                 auto col8 = block[8]->As<ColumnNullable>();
 
                 if (col0 && col1 && col2 && col3 && col4 && col5 && col6 && col7 && col8) {
-                    row.datetime = col0->At(i);
+                    row.datetime = std::to_string(col0->At(i));
                     row.msgtype = std::to_string(col1->At(i));
                     row.severity = col2->IsNull(i) ? "" : std::to_string(col2->Nested()->As<ColumnUInt8>()->At(i));
                     row.ownerpermissions = col3->IsNull(i) ? "" : col3->Nested()->As<ColumnString>()->At(i);
-                    row.operationresult = col4->IsNull(i) ? "" : std::to_string(
-                            col4->Nested()->As<ColumnUInt8>()->At(i));
+                    row.operationresult = col4->IsNull(i) ? "" : std::to_string(col4->Nested()->As<ColumnUInt8>()->At(i));
                     row.actiontype = col5->IsNull(i) ? "" : std::to_string(col5->Nested()->As<ColumnUInt8>()->At(i));
                     row.objectid = col6->IsNull(i) ? "" : col6->Nested()->As<ColumnString>()->At(i);
                     row.grouppermissions = col7->IsNull(i) ? "" : col7->Nested()->As<ColumnString>()->At(i);
                     row.classifyinglabel = col8->IsNull(i) ? "" : col8->Nested()->As<ColumnString>()->At(i);
                 } else {
-                    std::cerr << "Ошибка: один из столбцов имеет неправильный тип в таблице " << table_name
-                              << std::endl;
+                    std::cerr << "Ошибка: один из столбцов имеет неправильный тип в таблице " << table_name << std::endl;
                     continue;
                 }
             } catch (const std::exception &e) {
