@@ -1,108 +1,103 @@
-#include <iostream>
-#include <vector>
-#include <string>
 #include <clickhouse/client.h>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <sstream>
+#include <iomanip>
+#include <stdexcept>
 
 using namespace clickhouse;
+using namespace std;
 
-struct Row {
-    std::string datetime;
-    std::string msgtype;
-    std::string severity;
-    std::string ownerpermissions;
-    std::string operationresult;
-    std::string actiontype;
-    std::string objectid;
-    std::string grouppermissions;
-    std::string classifyinglabel;
-};
-
-bool compareRows(const Row &a, const Row &b) {
-    return a.datetime == b.datetime &&
-           a.msgtype == b.msgtype &&
-           a.severity == b.severity &&
-           a.ownerpermissions == b.ownerpermissions &&
-           a.operationresult == b.operationresult &&
-           a.actiontype == b.actiontype &&
-           a.objectid == b.objectid &&
-           a.grouppermissions == b.grouppermissions &&
-           a.classifyinglabel == b.classifyinglabel;
-}
-
-std::vector<Row> fetchRows(Client &client, const std::string &table_name) {
-    std::vector<Row> rows;
-    std::string query = "SELECT * FROM " + table_name;
-
-    client.Select(query, [&](const Block &block) {
-        std::cout << "Processing block with " << block.GetRowCount() << " rows and " << block.GetColumnCount() << " columns." << std::endl;
-
-
-
-        for (size_t i = 0; i < block.GetRowCount(); ++i) {
-            Row row;
-            try {
-                auto col0 = block[0]->As<ColumnDateTime64>();
-                auto col1 = block[1]->As<ColumnUInt32>();
-                auto col2 = block[2]->As<ColumnNullable>();
-                auto col3 = block[3]->As<ColumnNullable>();
-                auto col4 = block[4]->As<ColumnNullable>();
-                auto col5 = block[5]->As<ColumnNullable>();
-                auto col6 = block[6]->As<ColumnNullable>();
-                auto col7 = block[7]->As<ColumnNullable>();
-                auto col8 = block[8]->As<ColumnNullable>();
-
-                if (col0 && col1 && col2 && col3 && col4 && col5 && col6 && col7 && col8) {
-                    row.datetime = std::to_string(col0->At(i));
-                    row.msgtype = std::to_string(col1->At(i));
-                    row.severity = col2->IsNull(i) ? "" : std::to_string(col2->Nested()->As<ColumnUInt8>()->At(i));
-                    row.ownerpermissions = col3->IsNull(i) ? "" : col3->Nested()->As<ColumnString>()->At(i);
-                    row.operationresult = col4->IsNull(i) ? "" : std::to_string(col4->Nested()->As<ColumnUInt8>()->At(i));
-                    row.actiontype = col5->IsNull(i) ? "" : std::to_string(col5->Nested()->As<ColumnUInt8>()->At(i));
-                    row.objectid = col6->IsNull(i) ? "" : col6->Nested()->As<ColumnString>()->At(i);
-                    row.grouppermissions = col7->IsNull(i) ? "" : col7->Nested()->As<ColumnString>()->At(i);
-                    row.classifyinglabel = col8->IsNull(i) ? "" : col8->Nested()->As<ColumnString>()->At(i);
-                } else {
-                    std::cerr << "Ошибка: один из столбцов имеет неправильный тип в таблице " << table_name << std::endl;
-                    continue;
-                }
-            } catch (const std::exception &e) {
-                std::cerr << "Ошибка при обработке строки " << i << ": " << e.what() << std::endl;
-                continue; // Пропустить эту строку
-            }
-            rows.push_back(row);
+// Implementing join function
+string join(const vector<string>& elements, const string& delimiter) {
+    ostringstream os;
+    for (auto it = elements.begin(); it != elements.end(); ++it) {
+        if (it != elements.begin()) {
+            os << delimiter;
         }
-    });
-
-    return rows;
+        os << *it;
+    }
+    return os.str();
 }
 
 int main() {
-    try {
-        ClientOptions options;
-        options.SetHost("localhost")
-                .SetPort(9000)
-                .SetUser("default")
-                .SetPassword("")
-                .SetDefaultDatabase("default");
+    ClientOptions options;
+    options.SetHost("localhost");
 
-        Client client(options);
+    Client client(options);
 
-        auto rows1 = fetchRows(client, "t_accessattributes");
-        auto rows2 = fetchRows(client, "t_accessattributes2");
+    vector<pair<string, string>> columns = {
+            {"datetime", "DateTime64(3)"},
+            {"msgtype", "UInt32"},
+            {"severity", "Nullable(UInt8)"},
+            {"ownerpermissions", "Nullable(String)"},
+            {"operationresult", "Nullable(UInt8)"},
+            {"actiontype", "Nullable(UInt8)"},
+            {"objectid", "Nullable(String)"},
+            {"grouppermissions", "Nullable(String)"},
+            {"classifyinglabel", "Nullable(String)"}
+    };
 
-        int matching_rows_count = 0;
+    string table_name = "t_accessattributes";
+    vector<string> values;
 
-        for (const auto &row1: rows1) {
-            for (const auto &row2: rows2) {
-                if (compareRows(row1, row2)) {
-                    ++matching_rows_count;
+    for (const auto& col : columns) {
+        string value;
+        cout << col.first << " (" << col.second << "): ";
+        getline(cin, value);
+
+        // Trim the value
+        value.erase(0, value.find_first_not_of(" \t\n\r\f\v"));
+        value.erase(value.find_last_not_of(" \t\n\r\f\v") + 1);
+
+        if (col.second == "DateTime64(3)") {
+            // Ensure the datetime format is correct
+            struct tm tm = {};
+            stringstream ss(value);
+            ss >> get_time(&tm, "%Y-%m-%d %H:%M:%S");
+            if (ss.fail()) {
+                cerr << "Error: Неправильный формат DATETIME " << value << ". Ожидаемый формат YYYY-MM-DD HH:MM:SS" << endl;
+                return 1;
+            }
+            value = to_string(mktime(&tm)) + ".000";  // convert to timestamp and add milliseconds
+        } else if (col.second == "UInt32") {
+            try {
+                uint32_t val = stoul(value);
+                value = to_string(val);
+            } catch (const invalid_argument& e) {
+                cerr << "Error: Столбец " << col.first << " имеет неправильный формат " << value << ". Ожидаемый формат " << col.second << "." << endl;
+                return 1;
+            }
+        } else if (col.second == "Nullable(UInt8)") {
+            try {
+                if (!value.empty()) {
+                    uint8_t val = static_cast<uint8_t>(stoul(value));
+                    value = to_string(val);
+                } else {
+                    value = "NULL";
                 }
+            } catch (const invalid_argument& e) {
+                cerr << "Error: Столбец " << col.first << " имеет неправильный формат " << value << ". Ожидаемый формат " << col.second << "." << endl;
+                return 1;
+            }
+        } else if (col.second == "Nullable(String)") {
+            if (value.empty()) {
+                value = "NULL";
+            } else {
+                value = "'" + value + "'";
             }
         }
 
-        std::cout << "Количество совпадающих строк: " << matching_rows_count << std::endl;
-    } catch (const std::exception &e) {
-        std::cerr << "Исключение: " << e.what() << std::endl;
+        values.push_back(value);
+    }
+
+    try {
+        string query = "INSERT INTO " + table_name + " VALUES (" + join(values, ", ") + ")";
+        client.Execute(query);
+        cout << "Данные успешно вставлены." << endl;
+    } catch (const ServerException& e) {
+        cerr << "Error: " << e.what() << endl;
         return 1;
     }
 
