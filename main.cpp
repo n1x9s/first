@@ -9,7 +9,6 @@
 using namespace clickhouse;
 using namespace std;
 
-// Implementing join function
 string join(const vector<string>& elements, const string& delimiter) {
     ostringstream os;
     for (auto it = elements.begin(); it != elements.end(); ++it) {
