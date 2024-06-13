@@ -46,12 +46,10 @@ int main() {
         cout << col.first << " (" << col.second << "): ";
         getline(cin, value);
 
-        // Trim the value
         value.erase(0, value.find_first_not_of(" \t\n\r\f\v"));
         value.erase(value.find_last_not_of(" \t\n\r\f\v") + 1);
 
         if (col.second == "DateTime64(3)") {
-            // Ensure the datetime format is correct
             struct tm tm = {};
             stringstream ss(value);
             ss >> get_time(&tm, "%Y-%m-%d %H:%M:%S");
@@ -59,7 +57,7 @@ int main() {
                 cerr << "Error: Неправильный формат DATETIME " << value << ". Ожидаемый формат YYYY-MM-DD HH:MM:SS" << endl;
                 return 1;
             }
-            value = to_string(mktime(&tm)) + ".000";  // convert to timestamp and add milliseconds
+            value = to_string(mktime(&tm)) + ".000";
         } else if (col.second == "UInt32") {
             try {
                 uint32_t val = stoul(value);
