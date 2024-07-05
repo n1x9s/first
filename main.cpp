@@ -27,20 +27,30 @@ string join(const vector<string>& elements, const string& delimiter) {
     return os.str();
 }
 
-// Проверка соответствия типов столбцов
-bool validateColumnTypes(const TblCol& expectedColumns, const TblCol& actualColumns) {
-    if (expectedColumns.size() != actualColumns.size()) {
-        return false;
-    }
-
-    for (size_t i = 0; i < expectedColumns.size(); ++i) {
-        if (expectedColumns[i].first != actualColumns[i].first ||
-            expectedColumns[i].second != actualColumns[i].second) {
-            return false;
+// Получение списка таблиц в базе данных
+vector<string> getTables(Client& client) {
+    vector<string> tables;
+    client.Select("SHOW TABLES", [&](const Block& block) {
+        for (size_t i = 0; i < block.GetRowCount(); ++i) {
+            string table(block[0]->As<ColumnString>()->At(i));
+            tables.push_back(table);
         }
-    }
+    });
+    return tables;
+}
 
-    return true;
+// Получение типов столбцов выбранной таблицы
+TblCol getTableSchema(Client& client, const string& table_name) {
+    TblCol columns;
+    string query = "SELECT name, type FROM system.columns WHERE table = '" + table_name + "'";
+    client.Select(query, [&](const Block& block) {
+        for (size_t i = 0; i < block.GetRowCount(); ++i) {
+            string name(block[0]->As<ColumnString>()->At(i));
+            string type(block[1]->As<ColumnString>()->At(i));
+            columns.emplace_back(name, type);
+        }
+    });
+    return columns;
 }
 
 int main() {
@@ -49,36 +59,34 @@ int main() {
 
     Client client(options);
 
-    vector<pair<string, string>> expectedColumns = {
-            {"datetime", "DateTime64(3)"},
-            {"msgtype", "UInt32"},
-            {"severity", "Nullable(UInt8)"},
-            {"ownerpermissions", "Nullable(String)"},
-            {"operationresult", "Nullable(UInt8)"},
-            {"actiontype", "Nullable(UInt8)"},
-            {"objectid", "Nullable(String)"},
-            {"grouppermissions", "Nullable(String)"},
-            {"classifyinglabel", "Nullable(String)"}
-    };
+    // Получение списка таблиц
+    vector<string> tables = getTables(client);
 
-    string table_name = "t_accessattributes";
+    if (tables.empty()) {
+        cerr << "Ошибка: В базе данных нет таблиц." << endl;
+        return 1;
+    }
 
-    // Запрос для получения типов столбцов из ClickHouse
-    string query = "SELECT name, type FROM system.columns WHERE table = '" + table_name + "'";
+    cout << "Доступные таблицы:" << endl;
+    for (const auto& table : tables) {
+        cout << "- " << table << endl;
+    }
 
-    // Выполнение запроса и получение типов столбцов
-    vector<pair<string, string>> actualColumns;
-    client.Select(query, [&](const Block& block) {
-        for (size_t i = 0; i < block.GetRowCount(); ++i) {
-            string name(block[0]->As<ColumnString>()->At(i)); // Преобразование string_view в string
-            string type(block[1]->As<ColumnString>()->At(i)); // Преобразование string_view в string
-            actualColumns.emplace_back(name, type);
-        }
-    });
+    string table_name;
+    cout << "Введите имя таблицы: ";
+    getline(cin, table_name);
 
-    // Проверка типов столбцов
-    if (!validateColumnTypes(expectedColumns, actualColumns)) {
-        cerr << "Ошибка: Типы столбцов в таблице не соответствуют ожидаемым типам." << endl;
+    // Проверка наличия выбранной таблицы
+    if (find(tables.begin(), tables.end(), table_name) == tables.end()) {
+        cerr << "Ошибка: Таблица с именем '" << table_name << "' не найдена." << endl;
+        return 1;
+    }
+
+    // Получение схемы таблицы
+    TblCol expectedColumns = getTableSchema(client, table_name);
+
+    if (expectedColumns.empty()) {
+        cerr << "Ошибка: Не удалось получить схему таблицы '" << table_name << "'." << endl;
         return 1;
     }
 
@@ -92,42 +100,41 @@ int main() {
         value.erase(0, value.find_first_not_of(" \t\n\r\f\v"));
         value.erase(value.find_last_not_of(" \t\n\r\f\v") + 1);
 
-        if (col.second == "DateTime64(3)") {
-            // Проверка формата даты и времени
-            struct tm tm = {};
-            stringstream ss(value);
-            ss >> get_time(&tm, "%Y-%m-%d %H:%M:%S");
-            if (ss.fail()) {
-                cerr << "Ошибка: Неверный формат даты и времени для значения " << value << ". Ожидаемый формат: YYYY-MM-DD HH:MM:SS" << endl;
-                return 1;
-            }
-            value = to_string(mktime(&tm)) + ".000";  // преобразование в timestamp и добавление миллисекунд
-        } else if (col.second == "UInt32") {
-            try {
+        try {
+            if (col.second == "DateTime64(3)") {
+                // Проверка формата даты и времени
+                struct tm tm = {};
+                stringstream ss(value);
+                ss >> get_time(&tm, "%Y-%m-%d %H:%M:%S");
+                if (ss.fail()) {
+                    cerr << "Ошибка: Неверный формат даты и времени для значения " << value << ". Ожидаемый формат: YYYY-MM-DD HH:MM:SS" << endl;
+                    return 1;
+                }
+                value = to_string(mktime(&tm)) + ".000";  // преобразование в timestamp и добавление миллисекунд
+            } else if (col.second.find("UInt32") != string::npos) {
                 uint32_t val = stoul(value);
                 value = to_string(val);
-            } catch (const invalid_argument& e) {
-                cerr << "Ошибка: Столбец " << col.first << " имеет неверный тип для значения " << value << ". Ожидаемый тип: " << col.second << "." << endl;
-                return 1;
-            }
-        } else if (col.second == "Nullable(UInt8)") {
-            try {
+            } else if (col.second.find("Nullable(UInt8)") != string::npos) {
                 if (!value.empty()) {
                     uint8_t val = static_cast<uint8_t>(stoul(value));
                     value = to_string(val);
                 } else {
                     value = "NULL";
                 }
-            } catch (const invalid_argument& e) {
-                cerr << "Ошибка: Столбец " << col.first << " имеет неверный тип для значения " << value << ". Ожидаемый тип: " << col.second << "." << endl;
-                return 1;
-            }
-        } else if (col.second == "Nullable(String)") {
-            if (value.empty()) {
-                value = "NULL";
-            } else {
+            } else if (col.second.find("Nullable(String)") != string::npos) {
+                if (value.empty()) {
+                    value = "NULL";
+                } else {
+                    value = "'" + value + "'";
+                }
+            } else if (col.second.find("String") != string::npos) {
                 value = "'" + value + "'";
+            } else {
+                value = value; // Для других типов данных
             }
+        } catch (const invalid_argument& e) {
+            cerr << "Ошибка: Столбец " << col.first << " имеет неверный тип для значения " << value << ". Ожидаемый тип: " << col.second << "." << endl;
+            return 1;
         }
 
         values.push_back(value);
