@@ -15,7 +15,7 @@ using TblCol = vector<Col>;
 using Tbl = pair<string, TblCol>;
 using Db = vector<Tbl>;
 
-// Реализация функции join
+
 string join(const vector<string>& elements, const string& delimiter) {
     ostringstream os;
     for (auto it = elements.begin(); it != elements.end(); ++it) {
@@ -27,7 +27,7 @@ string join(const vector<string>& elements, const string& delimiter) {
     return os.str();
 }
 
-// Получение списка таблиц в базе данных
+
 vector<string> getTables(Client& client) {
     vector<string> tables;
     client.Select("SHOW TABLES", [&](const Block& block) {
@@ -39,7 +39,7 @@ vector<string> getTables(Client& client) {
     return tables;
 }
 
-// Получение типов столбцов выбранной таблицы
+
 TblCol getTableSchema(Client& client, const string& table_name) {
     TblCol columns;
     string query = "SELECT name, type FROM system.columns WHERE table = '" + table_name + "'";
@@ -59,7 +59,7 @@ int main() {
 
     Client client(options);
 
-    // Получение списка таблиц
+
     vector<string> tables = getTables(client);
 
     if (tables.empty()) {
@@ -76,13 +76,12 @@ int main() {
     cout << "Введите имя таблицы: ";
     getline(cin, table_name);
 
-    // Проверка наличия выбранной таблицы
+   
     if (find(tables.begin(), tables.end(), table_name) == tables.end()) {
         cerr << "Ошибка: Таблица с именем '" << table_name << "' не найдена." << endl;
         return 1;
     }
 
-    // Получение схемы таблицы
     TblCol expectedColumns = getTableSchema(client, table_name);
 
     if (expectedColumns.empty()) {
@@ -95,14 +94,13 @@ int main() {
         string value;
         cout << col.first << " (" << col.second << "): ";
         getline(cin, value);
-
-        // Удаление пробелов в начале и в конце строки
+        
         value.erase(0, value.find_first_not_of(" \t\n\r\f\v"));
         value.erase(value.find_last_not_of(" \t\n\r\f\v") + 1);
 
         try {
             if (col.second == "DateTime64(3)") {
-                // Проверка формата даты и времени
+
                 struct tm tm = {};
                 stringstream ss(value);
                 ss >> get_time(&tm, "%Y-%m-%d %H:%M:%S");
@@ -110,7 +108,7 @@ int main() {
                     cerr << "Ошибка: Неверный формат даты и времени для значения " << value << ". Ожидаемый формат: YYYY-MM-DD HH:MM:SS" << endl;
                     return 1;
                 }
-                value = to_string(mktime(&tm)) + ".000";  // преобразование в timestamp и добавление миллисекунд
+                value = to_string(mktime(&tm)) + ".000";  
             } else if (col.second.find("UInt32") != string::npos) {
                 uint32_t val = stoul(value);
                 value = to_string(val);
@@ -130,7 +128,7 @@ int main() {
             } else if (col.second.find("String") != string::npos) {
                 value = "'" + value + "'";
             } else {
-                value = value; // Для других типов данных
+                value = value; 
             }
         } catch (const invalid_argument& e) {
             cerr << "Ошибка: Столбец " << col.first << " имеет неверный тип для значения " << value << ". Ожидаемый тип: " << col.second << "." << endl;
