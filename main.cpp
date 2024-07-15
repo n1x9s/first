@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <unordered_map>
+#include "schemas.h"
 
 using namespace clickhouse;
 using namespace std;
@@ -14,7 +15,6 @@ using Col = pair<string, string>;
 using TblCol = vector<Col>;
 using Tbl = pair<string, TblCol>;
 using Db = vector<Tbl>;
-
 
 string join(const vector<string>& elements, const string& delimiter) {
     ostringstream os;
@@ -27,7 +27,6 @@ string join(const vector<string>& elements, const string& delimiter) {
     return os.str();
 }
 
-
 vector<string> getTables(Client& client) {
     vector<string> tables;
     client.Select("SHOW TABLES", [&](const Block& block) {
@@ -38,7 +37,6 @@ vector<string> getTables(Client& client) {
     });
     return tables;
 }
-
 
 TblCol getTableSchema(Client& client, const string& table_name) {
     TblCol columns;
@@ -53,12 +51,28 @@ TblCol getTableSchema(Client& client, const string& table_name) {
     return columns;
 }
 
+bool compareSchema(const TblCol& actual, const TblCol& expected) {
+    if (actual.size() != expected.size()) {
+        cerr << "Ошибка: Количество столбцов не совпадает." << endl;
+        return false;
+    }
+
+    for (size_t i = 0; i < actual.size(); ++i) {
+        if (actual[i].first != expected[i].first || actual[i].second != expected[i].second) {
+            cerr << "Ошибка: Несоответствие в столбце '" << actual[i].first << "'. Ожидаемый тип: "
+                 << expected[i].second << ", фактический тип: " << actual[i].second << "." << endl;
+            return false;
+        }
+    }
+
+    return true;
+}
+
 int main() {
     ClientOptions options;
     options.SetHost("localhost");
 
     Client client(options);
-
 
     vector<string> tables = getTables(client);
 
@@ -76,31 +90,36 @@ int main() {
     cout << "Введите имя таблицы: ";
     getline(cin, table_name);
 
-   
     if (find(tables.begin(), tables.end(), table_name) == tables.end()) {
         cerr << "Ошибка: Таблица с именем '" << table_name << "' не найдена." << endl;
         return 1;
     }
 
-    TblCol expectedColumns = getTableSchema(client, table_name);
+    TblCol actualColumns = getTableSchema(client, table_name);
+    unordered_map<string, TblCol> schemas = getSchemas();
 
-    if (expectedColumns.empty()) {
-        cerr << "Ошибка: Не удалось получить схему таблицы '" << table_name << "'." << endl;
+    if (schemas.find(table_name) == schemas.end()) {
+        cerr << "Ошибка: Нет эталонной схемы для таблицы '" << table_name << "'." << endl;
+        return 1;
+    }
+
+    TblCol expectedColumns = schemas[table_name];
+
+    if (!compareSchema(actualColumns, expectedColumns)) {
         return 1;
     }
 
     vector<string> values;
-    for (const auto& col : expectedColumns) {
+    for (const auto& col : actualColumns) {
         string value;
         cout << col.first << " (" << col.second << "): ";
         getline(cin, value);
-        
+
         value.erase(0, value.find_first_not_of(" \t\n\r\f\v"));
         value.erase(value.find_last_not_of(" \t\n\r\f\v") + 1);
 
         try {
             if (col.second == "DateTime64(3)") {
-
                 struct tm tm = {};
                 stringstream ss(value);
                 ss >> get_time(&tm, "%Y-%m-%d %H:%M:%S");
@@ -108,7 +127,7 @@ int main() {
                     cerr << "Ошибка: Неверный формат даты и времени для значения " << value << ". Ожидаемый формат: YYYY-MM-DD HH:MM:SS" << endl;
                     return 1;
                 }
-                value = to_string(mktime(&tm)) + ".000";  
+                value = to_string(mktime(&tm)) + ".000";
             } else if (col.second.find("UInt32") != string::npos) {
                 uint32_t val = stoul(value);
                 value = to_string(val);
@@ -128,7 +147,7 @@ int main() {
             } else if (col.second.find("String") != string::npos) {
                 value = "'" + value + "'";
             } else {
-                value = value; 
+                value = value;
             }
         } catch (const invalid_argument& e) {
             cerr << "Ошибка: Столбец " << col.first << " имеет неверный тип для значения " << value << ". Ожидаемый тип: " << col.second << "." << endl;
