@@ -82,26 +82,32 @@ int main() {
     }
 
     unordered_map<string, TblCol> schemas = getSchemas();
-    vector<string> validTables;
+
+    bool allTablesMatch = true;
 
     for (const auto& table : tables) {
         if (schemas.find(table) != schemas.end()) {
             TblCol actualColumns = getTableSchema(client, table);
             TblCol expectedColumns = schemas[table];
 
-            if (compareSchema(actualColumns, expectedColumns)) {
-                validTables.push_back(table);
+            if (!compareSchema(actualColumns, expectedColumns)) {
+                allTablesMatch = false;
             }
+        } else {
+            cerr << "Ошибка: Эталонная схема для таблицы '" << table << "' не найдена." << endl;
+            allTablesMatch = false;
         }
     }
 
-    if (validTables.empty()) {
-        cerr << "Ошибка: Нет таблиц, соответствующих эталонным схемам." << endl;
+    if (!allTablesMatch) {
+        cerr << "Ошибка: Схемы таблиц в базе данных не совпадают с эталонными." << endl;
         return 1;
     }
 
+    cout << "Все таблицы соответствуют эталонным схемам." << endl;
+
     cout << "Доступные таблицы:" << endl;
-    for (const auto& table : validTables) {
+    for (const auto& table : tables) {
         cout << "- " << table << endl;
     }
 
@@ -109,13 +115,14 @@ int main() {
     cout << "Введите имя таблицы: ";
     getline(cin, table_name);
 
-    if (find(validTables.begin(), validTables.end(), table_name) == validTables.end()) {
-        cerr << "Ошибка: Таблица с именем '" << table_name << "' не найдена или не соответствует эталонной схеме." << endl;
+    if (find(tables.begin(), tables.end(), table_name) == tables.end()) {
+        cerr << "Ошибка: Таблица с именем '" << table_name << "' не найдена." << endl;
         return 1;
     }
 
     TblCol actualColumns = getTableSchema(client, table_name);
     vector<string> values;
+
     for (const auto& col : actualColumns) {
         string value;
         cout << col.first << " (" << col.second << "): ";
